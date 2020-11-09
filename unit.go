@@ -1,149 +1,154 @@
 package neuron
 
 import (
-	"fmt"
-	"reflect"
+	"math/rand"
 	"time"
 )
 
 // A Unit is a single neuron unit with weights input/output channels.
 type Unit struct {
-	id string
+	id      string
+	rectify bool
+	fired   bool
 	// Weights for each input connection.
-	weight []float64
+	weight map[string]float64
 	bias   float64
 	// Values for each input connection.
-	value  []float64
-	preact float64
-	// Accumulated grad wrt output.
-	grad float64
-	// Two channels for each connection. One forward, one backward.
-	input  [][2]chan float64
-	output [][2]chan float64
+	value map[string]float64
+	// Single input channel.
+	input chan signal
+	// Output channels for each downstream connection.
+	output map[string](chan signal)
+	// Similarly, input and output channels for backwards communication.
+	inputB  chan signal
+	outputB map[string](chan signal)
 }
 
-// Zero out an earlier activation.
+type signal struct {
+	id    string
+	value float64
+}
+
+// NewUnit creates a new Unit with a given string id. It allocates new input
+// channels and empty maps for weights, values, and outputs.
+func NewUnit(id string, rectify bool) *Unit {
+	u := Unit{
+		id:      id,
+		rectify: rectify,
+		weight:  make(map[string]float64),
+		bias:    0.1,
+		value:   make(map[string]float64),
+		// TODO: Need a large buffer to accommodate multiple units sending signals
+		// simultaneously. But how big do I need?
+		input:   make(chan signal, 512),
+		output:  make(map[string](chan signal)),
+		inputB:  make(chan signal, 512),
+		outputB: make(map[string](chan signal)),
+	}
+	return &u
+}
+
+// Connect connects two units together in series: u1 -> u2.
+func Connect(u1, u2 *Unit) {
+	// Create forward connection from u1 -> u2 by giving u1 a reference to u2's
+	// input channel.
+	u1.output[u2.id] = u2.input
+	// Initialize a weight value for u1 -> u2.
+	u2.initWeight(u1.id)
+	// Create backward connection from u1 <- u2 by giving u2 a reference to u1's
+	// backward input channel.
+	u2.outputB[u1.id] = u1.inputB
+}
+
+var rng = rand.New(rand.NewSource(12))
+
+// Initialize a weight value by sampling randomly from [-0.01, 0.01).
+func (u *Unit) initWeight(id string) float64 {
+	w := rng.Float64()
+	w = 0.02*w - 0.01
+	u.weight[id] = w
+	return w
+}
+
+// Zero out previous activation.
 func (u *Unit) zero() {
-	u.preact = u.bias
-	u.grad = 0.0
-	for ii := range u.value {
-		u.value[ii] = 0.0
+	for k := range u.value {
+		u.value[k] = 0.0
 	}
+	u.fired = false
 }
 
-// Forward pass through the unit.
-// Returns once some input has been received, and a timeout exceeded. Before
-// returning, it fires an activation is exceeding a threshold.
-func (u *Unit) Forward() (closed bool) {
-	// Generate the list of cases to select from. One for each input, plus a
-	// default case.
-	numIn := len(u.input)
-	cases := make([]reflect.SelectCase, numIn+1)
-	for ii := range u.input {
-		cases[ii] = reflect.SelectCase{
-			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(u.input[ii][0]),
-		}
-	}
-	cases[numIn] = reflect.SelectCase{Dir: reflect.SelectDefault}
-
+// Forward pass through the unit. Waits until it starts receiving some input.
+// After a timeout is reached, it fires an activation if a threshold is
+// exceeded.
+func (u *Unit) forward() {
+	const numWait = 5
+	const waitMsec = 1.0
 	numRecv := 0
 	waitCount := 0
-	numOpen := numIn
 	u.zero()
 
-	for {
-		chosen, value, ok := reflect.Select(cases)
-
-		if chosen < numIn {
-			if ok {
-				// Received a signal from one of the input connections.
-				// Update the value and pre-activation.
-				u.value[chosen] += value.Float()
-				u.preact += u.weight[chosen] * value.Float()
-				numRecv++
-			} else {
-				// One of the input connections is now closed. This should only happen
-				// when all inputs are closing and the network is shutting down.
-				cases[chosen].Chan = reflect.ValueOf(nil)
-				numOpen--
-
-				if numOpen <= 0 {
-					break
-				}
-			}
-		} else {
+	preact := 0.0
+	for waitCount < numWait {
+		select {
+		case s := <-u.input:
+			// Received a signal from one of the input connections.
+			// Update the value and pre-activation.
+			u.value[s.id] += s.value
+			preact += u.weight[s.id] * s.value
+			numRecv++
+		default:
 			// Default case. Wait for some number of default case hits after the first
 			// input before exiting.
 			if numRecv > 0 {
 				waitCount++
 			}
-			// TODO: Make these parameters.
-			if waitCount >= 5 {
-				break
-			} else {
-				time.Sleep(time.Millisecond)
-			}
+			time.Sleep(waitMsec * time.Millisecond)
 		}
 	}
 
 	// Fire if pre-activation exceeds threshold.
-	if u.preact > 0 {
-		for ii := range u.output {
-			u.output[ii][0] <- u.preact
+	u.fired = !u.rectify || preact > 0
+	if u.fired {
+		for k := range u.output {
+			u.output[k] <- signal{id: u.id, value: preact}
 		}
 	}
-	closed = numOpen <= 0
-	return
 }
 
-// Backward pass through the unit.
-// Waits for gradients from all downstream connections, back-propagates, and
-// updates weights.
-func (u *Unit) Backward(lr float64) {
+// Backward pass through the unit. Waits for gradients from all downstream
+// connections, back-propagates, and updates weights.
+func (u *Unit) backward(lr float64) {
 	// If the unit didn't fire, there won't be any gradients.
-	// TODO: Need to support more general activations besides ReLU perhaps.
-	if u.preact <= 0 {
+	if !u.fired {
 		return
 	}
 
-	// Generate the list of cases to select from. One for each output. No default
-	// needed, since I assume Backward only gets called when we expect gradients.
-	numOut := len(u.output)
-	cases := make([]reflect.SelectCase, numOut)
-	for ii := range u.output {
-		cases[ii] = reflect.SelectCase{
-			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(u.output[ii][1]),
-		}
+	grad := 0.0
+	needRecv := make(map[string]bool)
+	for k := range u.output {
+		needRecv[k] = true
 	}
-
-	numRecv := 0
-	recvFrom := make(map[int]bool)
-	for numRecv < numOut {
-		chosen, value, ok := reflect.Select(cases)
-		if !ok {
-			// Backward connection should never be closed.
-			panic(fmt.Sprintf("(%s) Connection %d unexpectedly closed", u.id,
-				chosen))
-		}
-
-		// Received a grad from one of the output connections.
-		// Check that we haven't received from this connection yet.
-		if recvFrom[chosen] {
-			panic(fmt.Sprintf("(%s) Already received grad from %d", u.id, chosen))
-		}
-		recvFrom[chosen] = true
-		numRecv++
-
+	for len(needRecv) > 0 {
+		// Get a grad from one of the output connections.
+		s := <-u.inputB
 		// Accumulate gradient wrt output.
-		u.grad += value.Float()
+		grad += s.value
+		delete(needRecv, s.id)
 	}
 
 	// Backpropagate and update the weights.
-	for ii := range u.input {
-		u.input[ii][1] <- u.grad * u.weight[ii]
-		// TODO: Might want more general control over weight updates.
-		u.weight[ii] -= lr * u.grad * u.value[ii]
+	for k := range u.outputB {
+		u.outputB[k] <- signal{id: u.id, value: grad * u.weight[k]}
+		// TODO: Might want more flexible control over weight updates.
+		u.weight[k] -= lr * grad * u.value[k]
+	}
+}
+
+// Start starts an endless loop of forward/backward passes.
+func (u *Unit) Start(lr float64) {
+	for {
+		u.forward()
+		u.backward(lr)
 	}
 }
