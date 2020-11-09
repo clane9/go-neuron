@@ -1,15 +1,15 @@
 package neuron
 
 import (
+	"math"
 	"math/rand"
-	"time"
 )
 
 // A Unit is a single neuron unit with weights input/output channels.
 type Unit struct {
 	id      string
 	rectify bool
-	fired   bool
+	preact  float64
 	// Weights for each input connection.
 	weight map[string]float64
 	bias   float64
@@ -75,55 +75,45 @@ func (u *Unit) zero() {
 	for k := range u.value {
 		u.value[k] = 0.0
 	}
-	u.fired = false
+	u.preact = u.bias
 }
 
-// Forward pass through the unit. Waits until it starts receiving some input.
-// After a timeout is reached, it fires an activation if a threshold is
-// exceeded.
+// Forward pass through the unit. Collects input from all incoming units and
+// fires an activation.
+// TODO: Sparser communication would be more efficient and "brain-like". I.e.,
+// "fire" an activation only when non-zero. But it's not clear how to know when
+// you've received all the inputs you're going to receive. Previously I used a
+// timeout after first input. But this will miss inputs that are very delayed.
+// This wouldn't be so bad, the delay would act like a kind of dropout. But I
+// don't want stale inputs affecting the next forward pass.
 func (u *Unit) forward() {
-	const numWait = 5
-	const waitMsec = 1.0
-	numRecv := 0
-	waitCount := 0
 	u.zero()
-
-	preact := 0.0
-	for waitCount < numWait {
-		select {
-		case s := <-u.input:
-			// Received a signal from one of the input connections.
-			// Update the value and pre-activation.
-			u.value[s.id] += s.value
-			preact += u.weight[s.id] * s.value
-			numRecv++
-		default:
-			// Default case. Wait for some number of default case hits after the first
-			// input before exiting.
-			if numRecv > 0 {
-				waitCount++
-			}
-			time.Sleep(waitMsec * time.Millisecond)
-		}
+	needRecv := make(map[string]bool)
+	for k := range u.weight {
+		needRecv[k] = true
+	}
+	for len(needRecv) > 0 {
+		// Wait for a signal from one of the input connections.
+		// Update the value and pre-activation.
+		s := <-u.input
+		u.value[s.id] += s.value
+		u.preact += u.weight[s.id] * s.value
+		delete(needRecv, s.id)
 	}
 
-	// Fire if pre-activation exceeds threshold.
-	u.fired = !u.rectify || preact > 0
-	if u.fired {
-		for k := range u.output {
-			u.output[k] <- signal{id: u.id, value: preact}
-		}
+	// Fire activation
+	act := u.preact
+	if u.rectify {
+		act = math.Max(act, 0.0)
+	}
+	for k := range u.output {
+		u.output[k] <- signal{id: u.id, value: act}
 	}
 }
 
 // Backward pass through the unit. Waits for gradients from all downstream
 // connections, back-propagates, and updates weights.
 func (u *Unit) backward(lr float64) {
-	// If the unit didn't fire, there won't be any gradients.
-	if !u.fired {
-		return
-	}
-
 	grad := 0.0
 	needRecv := make(map[string]bool)
 	for k := range u.output {
@@ -136,6 +126,15 @@ func (u *Unit) backward(lr float64) {
 		grad += s.value
 		delete(needRecv, s.id)
 	}
+
+	// Chain rule through ReLU. If the unit didn't "fire", no real gradients. But
+	// still need to do backprop for synchronization purposes.
+	if u.rectify && u.preact <= 0 {
+		grad = 0.0
+	}
+
+	// Update the bias.
+	u.bias -= lr * grad
 
 	// Backpropagate and update the weights.
 	for k := range u.outputB {
