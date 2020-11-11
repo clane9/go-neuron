@@ -135,3 +135,19 @@ func (n *Net) Start(train bool, updateFreq int, lr float64) {
 		go start(u, train, updateFreq, lr)
 	}
 }
+
+// Start a unit's forward/backward/step loop. Note that forward and backward
+// wait for inputs and grads from outside.
+func start(u Unit, train bool, updateFreq int, lr float64) {
+	step := 1
+	for {
+		u.Forward()
+		if train {
+			u.Backward()
+			if updateFreq > 0 && step%updateFreq == 0 {
+				u.Step(lr)
+			}
+		}
+		step++
+	}
+}

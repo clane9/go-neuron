@@ -68,9 +68,6 @@ type Signal struct {
 	Value float64
 }
 
-// Placeholder IDs for input/output signals.
-// const inputID = "INPUT"
-
 // NewHiddenUnit creates a new HiddenUnit with a given string id. It allocates
 // new input channels and empty maps for weights, values, and outputs.
 func NewHiddenUnit(id string) *HiddenUnit {
@@ -105,7 +102,7 @@ func NewOutputUnit(id string) *OutputUnit {
 	u := OutputUnit{
 		ID:         id,
 		Weight:     make(map[string]float64),
-		Bias:       0.1,
+		Bias:       0.0,
 		value:      make(map[string]float64),
 		gradWeight: make(map[string]float64),
 		Input:      make(chan Signal, 512),
@@ -141,11 +138,9 @@ func FeedOut(u1 *HiddenUnit, u2 *OutputUnit) {
 	u2.OutputB[u1.ID] = u1.InputB
 }
 
-var rng = rand.New(rand.NewSource(12))
-
 // Initialize a weight value by sampling randomly from [-0.01, 0.01).
 func initWeight() float64 {
-	w := rng.Float64()
+	w := rand.Float64()
 	w = 0.02*w - 0.01
 	return w
 }
@@ -171,7 +166,7 @@ func (u *HiddenUnit) Forward() {
 		delete(needRecv, s.ID)
 	}
 
-	// Fire activation
+	// Apply ReLU and fire activation.
 	act := math.Max(u.preact, 0.0)
 	for k := range u.Output {
 		u.Output[k] <- Signal{ID: u.ID, Value: act}
@@ -233,7 +228,9 @@ func (u *HiddenUnit) Backward() {
 	// for synchronization purposes.
 	for k := range u.Weight {
 		u.gradWeight[k] += grad * u.value[k]
-		u.OutputB[k] <- Signal{ID: u.ID, Value: grad * u.Weight[k]}
+		if _, ok := u.OutputB[k]; ok {
+			u.OutputB[k] <- Signal{ID: u.ID, Value: grad * u.Weight[k]}
+		}
 	}
 	u.gradBias += grad
 }
@@ -248,7 +245,9 @@ func (u *OutputUnit) Backward() {
 
 	for k := range u.Weight {
 		u.gradWeight[k] += grad * u.value[k]
-		u.OutputB[k] <- Signal{ID: u.ID, Value: grad * u.Weight[k]}
+		if _, ok := u.OutputB[k]; ok {
+			u.OutputB[k] <- Signal{ID: u.ID, Value: grad * u.Weight[k]}
+		}
 	}
 	u.gradBias += grad
 }
@@ -275,20 +274,4 @@ func (u *OutputUnit) Step(lr float64) {
 	}
 	u.Bias -= lr * u.gradBias
 	u.gradBias = 0.0
-}
-
-// Start a unit's forward/backward/step loop. Note that forward and backward
-// wait for inputs and grads from outside.
-func start(u Unit, train bool, updateFreq int, lr float64) {
-	step := 1
-	for {
-		u.Forward()
-		if train {
-			u.Backward()
-			if updateFreq > 0 && step%updateFreq == 0 {
-				u.Step(lr)
-			}
-		}
-		step++
-	}
 }
