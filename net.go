@@ -4,9 +4,6 @@ import (
 	"fmt"
 )
 
-// TODO: Add lots of debug logging
-// TODO: Implement loss function, probably outside this file
-
 // A Net is a neural network consisting of a sequence of layers, each of which
 // contains one or more Units.
 type Net struct {
@@ -37,8 +34,9 @@ func NewMLP(arch []int) *Net {
 		HiddenLayers: make([][](*HiddenUnit), numLayers-2),
 		OutLayer:     make([](*OutputUnit), arch[numLayers-1]),
 	}
-	copy(n.Arch, arch)
 
+	Logf(1, "Building a %d layer network.\n  Arch=%v\n", numLayers, arch)
+	copy(n.Arch, arch)
 	const idFormStr = "%03d_%06d"
 
 	// Make input layer.
@@ -73,9 +71,9 @@ func NewMLP(arch []int) *Net {
 				case 0:
 					FeedIn(n.InLayer[jj], n.HiddenLayers[ii][kk])
 				case numLayers - 2:
-					FeedOut(n.HiddenLayers[ii][jj], n.OutLayer[kk])
+					FeedOut(n.HiddenLayers[ii-1][jj], n.OutLayer[kk])
 				default:
-					Connect(n.HiddenLayers[ii][jj], n.HiddenLayers[ii+1][kk])
+					Connect(n.HiddenLayers[ii-1][jj], n.HiddenLayers[ii][kk])
 				}
 			}
 		}
@@ -84,30 +82,30 @@ func NewMLP(arch []int) *Net {
 }
 
 // Forward pass through the network.
-func (n *Net) Forward(inData []float64) (outData []float64) {
-	inDim := len(inData)
+func (n *Net) Forward(data []float64) (output []float64) {
+	inDim := len(data)
 	if inDim != n.Arch[0] {
 		panic(fmt.Sprintf("Input dim (%d) not equal to number of input units (%d)",
 			inDim, n.Arch[0]))
 	}
 
-	outDim := n.Arch[len(n.Arch)-1]
-	outData = make([]float64, n.Arch[outDim])
-
 	// Feed in.
-	for ii, v := range inData {
+	for ii, v := range data {
 		n.InLayer[ii].Input <- v
 	}
 
+	outDim := n.Arch[len(n.Arch)-1]
+	output = make([]float64, outDim)
+
 	// Feed out.
 	for ii := 0; ii < outDim; ii++ {
-		outData[ii] = <-n.OutLayer[ii].Output
+		output[ii] = <-n.OutLayer[ii].Output
 	}
 	return
 }
 
 // Backward pass through the network.
-func (n *Net) Backward(grad []float64) {
+func (n *Net) Backward(grad []float64) (gradData []float64) {
 	outDim := n.Arch[len(n.Arch)-1]
 	gradDim := len(grad)
 	if gradDim != outDim {
@@ -119,20 +117,32 @@ func (n *Net) Backward(grad []float64) {
 	for ii, v := range grad {
 		n.OutLayer[ii].InputB <- v
 	}
+
+	inDim := n.Arch[0]
+	gradData = make([]float64, inDim)
+
+	// Feed out (backward).
+	for ii := 0; ii < inDim; ii++ {
+		gradData[ii] = <-n.InLayer[ii].OutputB
+	}
+	return
 }
 
 // Start running each unit's forward/backward/step loop concurrently.
 func (n *Net) Start(train bool, updateFreq int, lr float64) {
 	for _, u := range n.InLayer {
 		go start(u, train, updateFreq, lr)
+		Logf(2, "Start %s\n", u.ID)
 	}
 	for _, lH := range n.HiddenLayers {
 		for _, u := range lH {
 			go start(u, train, updateFreq, lr)
+			Logf(2, "Start %s\n", u.ID)
 		}
 	}
 	for _, u := range n.OutLayer {
 		go start(u, train, updateFreq, lr)
+		Logf(2, "Start %s\n", u.ID)
 	}
 }
 

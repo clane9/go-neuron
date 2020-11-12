@@ -1,7 +1,6 @@
 package neuron_test
 
 import (
-	"math"
 	"math/rand"
 	"testing"
 	"time"
@@ -11,6 +10,8 @@ import (
 
 // Test construction of new input, hidden, and output units.
 func TestNewUnits(t *testing.T) {
+	neuron.Logf(1, "Running TestNewUnits\n")
+
 	const id = "0000"
 	const initHBias = 0.1
 	const initOBias = 0.0
@@ -43,6 +44,8 @@ func TestNewUnits(t *testing.T) {
 // Test that we can connect units together and pass signals from one to the
 // next. (Bypasses Forward methods.)
 func TestConnections(t *testing.T) {
+	neuron.Logf(1, "Running TestConnections\n")
+
 	// Construct a simple series of units.
 	u1 := neuron.NewInputUnit("0001")
 	u2 := neuron.NewHiddenUnit("0002")
@@ -81,6 +84,8 @@ func TestConnections(t *testing.T) {
 
 // Test Forward/Backward/Step methods sequentially.
 func TestForwardBackwardStep(t *testing.T) {
+	neuron.Logf(1, "Running TestForwardBackwardStep\n")
+
 	// Seed rand so we get the same weights.
 	rand.Seed(12)
 
@@ -108,12 +113,18 @@ func TestForwardBackwardStep(t *testing.T) {
 	}
 
 	// Sequential backward pass.
-	const grad = 1.0
-	u4.InputB <- grad
+	const inGrad = 1.0
+	const outGrad = 8.260011566718042e-08
+	u4.InputB <- inGrad
 	u4.Backward()
 	u3.Backward()
 	u2.Backward()
 	u1.Backward()
+	g := <-u1.OutputB
+
+	if !almostEqual(outGrad, g) {
+		t.Errorf("Backward pass returned %.10f; expected %.4f", g, outGrad)
+	}
 
 	// Sequential gradient steps.
 	const lr = 1.0
@@ -144,10 +155,4 @@ func checkWeight(id string, wGot, wWant float64, t *testing.T) {
 	if !almostEqual(wGot, wWant) {
 		t.Errorf("Updated %s weight is %.10f; expected %.4f", id, wGot, wWant)
 	}
-}
-
-// Test whether two values are equal up to a tolerance.
-func almostEqual(a, b float64) bool {
-	const tol = 1.0e-06
-	return math.Abs(a-b) < tol
 }
