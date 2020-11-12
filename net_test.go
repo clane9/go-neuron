@@ -27,8 +27,8 @@ func TestNewMLP(t *testing.T) {
 }
 
 // Test full forward/backward/step loop for the entire MLP.
-func TestMLPForwardBackwardStep(t *testing.T) {
-	neuron.Logf(1, "Running TestNewMLP\n")
+func TestMLP(t *testing.T) {
+	neuron.Logf(1, "Running TestMLP\n")
 
 	// Seed rand so we get the same weights.
 	rand.Seed(12)
@@ -37,18 +37,40 @@ func TestMLPForwardBackwardStep(t *testing.T) {
 	n := neuron.NewMLP(arch)
 
 	n.Start(true, 1, 1.0)
+	output := n.Forward([]float64{1.123, -2.234})
+	n.Backward([]float64{1.0})
+	n.Sync()
 
 	const outWant = 8.4846442116e-05
-	output := n.Forward([]float64{1.123, -2.234})
 	neuron.Logf(1, "Output: %v\n", output)
 	if !almostEqual(output[0], outWant) {
 		t.Errorf("MLP output is %.10e; expected %.4e", output[0], outWant)
 	}
+}
 
-	const gradWant = 2.5042884999258233e-07
-	gradData := n.Backward([]float64{1.0})
-	neuron.Logf(1, "Grad wrt data: %v\n", gradData)
-	if !almostEqual(gradData[0], gradWant) {
-		t.Errorf("MLP grad output is %.10e; expected %.4e", gradData[0], gradWant)
+func BenchmarkMLP(b *testing.B) {
+	neuron.Verbosity = 0
+
+	// Seed rand so we get the same weights.
+	rand.Seed(12)
+
+	const inDim = 64
+	const outDim = 1
+	arch := []int{inDim, 128, 128, outDim}
+	n := neuron.NewMLP(arch)
+
+	input := make([]float64, inDim)
+	for ii := 0; ii < inDim; ii++ {
+		input[ii] = rand.Float64()
+	}
+	grad := []float64{1.0}
+
+	// lr set to 0 so we don't acually update the weights
+	n.Start(true, 1, 0.0)
+
+	for ii := 0; ii < b.N; ii++ {
+		n.Forward(input)
+		n.Backward(grad)
+		n.Sync()
 	}
 }

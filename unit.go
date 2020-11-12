@@ -5,18 +5,11 @@ import (
 	"math/rand"
 )
 
-// A Unit is an abstract single neuron unit with Forward, Backward, and Step
-// methods.
-type Unit interface {
-	Forward()
-	Backward()
-	Step(lr float64)
-}
-
-// A HiddenUnit is a single neuron unit belonging in hidden layers with weights
-// and input/output channels for forward and backward.
-type HiddenUnit struct {
+// A Unit is a single neuron unit with weights and input/output channels for
+// forward and backward.
+type Unit struct {
 	ID     string
+	Layer  UnitLayer
 	preact float64
 	// Weights for each input connection.
 	Weight map[string]float64
@@ -26,128 +19,87 @@ type HiddenUnit struct {
 	// Accumulated gradients for weights and bias.
 	gradWeight map[string]float64
 	gradBias   float64
-	// Single Input channel.
-	Input chan Signal
-	// Output channels for each downstream connection.
-	Output map[string](chan Signal)
+	// Single input channel.
+	input chan signal
+	// output channels for each downstream connection.
+	output map[string](chan signal)
 	// Similarly, input and output channels for backwards communication.
-	InputB  chan Signal
-	OutputB map[string](chan Signal)
+	inputB  chan signal
+	outputB map[string](chan signal)
+	// Channel to keep track of when the update is done.
+	stepDone chan int
 }
 
-// An InputUnit is a single neuron unit belonging in input layers. It has no
-// weights, only inputs and outputs.
-type InputUnit struct {
-	ID      string
-	preact  float64
-	Input   chan float64
-	Output  map[string](chan Signal)
-	InputB  chan Signal
-	OutputB chan float64
+// A UnitLayer defines the type of layer that a unit belongs to.
+type UnitLayer int
+
+const (
+	// InputLayer is for input units (no weights)
+	InputLayer UnitLayer = iota
+	// HiddenLayer is for hidden units (weights and ReLU)
+	HiddenLayer
+	// OutputLayer is for output units (weights and no ReLU)
+	OutputLayer
+)
+
+// signals are used to communicate between neuron Units.
+type signal struct {
+	id    string
+	value float64
 }
 
-// An OutputUnit is a single neuron unit belonging in output layers. It has
-// weights, but only a single output channel.
-type OutputUnit struct {
-	ID         string
-	preact     float64
-	Weight     map[string]float64
-	Bias       float64
-	value      map[string]float64
-	gradWeight map[string]float64
-	gradBias   float64
-	// Single Input and Output channels.
-	Input   chan Signal
-	Output  chan float64
-	InputB  chan float64
-	OutputB map[string](chan Signal)
-}
+// special ID for input and output channels.
+const inputID = "INPUT"
+const outputID = "OUTPUT"
 
-// A Signal is used to communicate between neuron Units. They contain a value
-// and the ID of the sender.
-type Signal struct {
-	ID    string
-	Value float64
-}
+// Create a new Unit with a given string id and layer type.
+func newUnit(id string, layer UnitLayer, stepDone chan int) *Unit {
+	// Set defaults depending on layer.
+	bias := 0.0
+	inCap := 512
+	inCapB := 512
+	switch layer {
+	case InputLayer:
+		inCap = 1
+	case HiddenLayer:
+		bias = 0.1
+	case OutputLayer:
+		inCapB = 1
+	}
 
-// NewHiddenUnit creates a new HiddenUnit with a given string id. It allocates
-// new input channels and empty maps for weights, values, and outputs.
-func NewHiddenUnit(id string) *HiddenUnit {
-	u := HiddenUnit{
+	u := Unit{
 		ID:         id,
+		Layer:      layer,
 		Weight:     make(map[string]float64),
-		Bias:       0.1,
+		Bias:       bias,
 		value:      make(map[string]float64),
 		gradWeight: make(map[string]float64),
-		// TODO: Need a large buffer to accommodate multiple units sending signals
-		// simultaneously. But how big do I need?
-		Input:   make(chan Signal, 512),
-		Output:  make(map[string](chan Signal)),
-		InputB:  make(chan Signal, 512),
-		OutputB: make(map[string](chan Signal)),
+		input:      make(chan signal, inCap),
+		output:     make(map[string](chan signal)),
+		inputB:     make(chan signal, inCapB),
+		outputB:    make(map[string](chan signal)),
+		stepDone:   stepDone,
 	}
-	Logf(2, "New hidden unit %s\n", id)
+
+	// Add a special output channel.
+	if layer == OutputLayer {
+		u.output[outputID] = make(chan signal, 1)
+	}
+	Logf(2, "New unit %s\n", id)
 	return &u
 }
 
-// NewInputUnit creates a new InputUnit with a given string id.
-func NewInputUnit(id string) *InputUnit {
-	u := InputUnit{
-		ID:      id,
-		Input:   make(chan float64, 1),
-		Output:  make(map[string](chan Signal)),
-		InputB:  make(chan Signal, 512),
-		OutputB: make(chan float64, 1),
-	}
-	Logf(2, "New input unit %s\n", id)
-	return &u
-}
-
-// NewOutputUnit creates a new OutputUnit with a given string id.
-func NewOutputUnit(id string) *OutputUnit {
-	u := OutputUnit{
-		ID:         id,
-		Weight:     make(map[string]float64),
-		Bias:       0.0,
-		value:      make(map[string]float64),
-		gradWeight: make(map[string]float64),
-		Input:      make(chan Signal, 512),
-		Output:     make(chan float64, 1),
-		InputB:     make(chan float64, 1),
-		OutputB:    make(map[string](chan Signal)),
-	}
-	Logf(2, "New output unit %s\n", id)
-	return &u
-}
-
-// Connect connects two units together in series: u1 -> u2.
-// TODO: these turn out to all be the same. Can we consolidate?
-func Connect(u1, u2 *HiddenUnit) {
+// connect two units together in series: u1 -> u2.
+func connect(u1, u2 *Unit) {
 	// Create forward connection from u1 -> u2 by giving u1 a reference to u2's
 	// input channel.
-	u1.Output[u2.ID] = u2.Input
+	u1.output[u2.ID] = u2.input
 	// Initialize a weight value for u1 -> u2.
 	u2.Weight[u1.ID] = initWeight()
 	// Create backward connection from u1 <- u2 by giving u2 a reference to u1's
 	// backward input channel.
-	u2.OutputB[u1.ID] = u1.InputB
+	u2.outputB[u1.ID] = u1.inputB
 	Logf(2, "Connect: %s -> %s\n", u1.ID, u2.ID)
-}
-
-// FeedIn connects an input unit to a hidden unit.
-func FeedIn(u1 *InputUnit, u2 *HiddenUnit) {
-	u1.Output[u2.ID] = u2.Input
-	u2.Weight[u1.ID] = initWeight()
-	u2.OutputB[u1.ID] = u1.InputB
-	Logf(2, "Feed in: %s -> %s\n", u1.ID, u2.ID)
-}
-
-// FeedOut connects a hidden unit to an output unit.
-func FeedOut(u1 *HiddenUnit, u2 *OutputUnit) {
-	u1.Output[u2.ID] = u2.Input
-	u2.Weight[u1.ID] = initWeight()
-	u2.OutputB[u1.ID] = u1.InputB
-	Logf(2, "Feed out: %s -> %s\n", u1.ID, u2.ID)
 }
 
 // Initialize a weight value by sampling randomly from [-0.01, 0.01).
@@ -157,163 +109,119 @@ func initWeight() float64 {
 	return w
 }
 
-// Forward pass for hidden units. Collects input from all incoming units and
+// Forward pass through the unit. Collects input from all incoming units and
 // fires an activation.
-func (u *HiddenUnit) Forward() {
-	// Zero out the previous activations, and note the units we need activations
-	// from.
-	needRecv := make(map[string]bool)
-	for k := range u.Weight {
-		u.value[k] = 0.0
-		needRecv[k] = true
-	}
-	// Initialize the pre-activation
-	u.preact = u.Bias
-	// Get inputs from all incoming units.
-	for len(needRecv) > 0 {
-		s := <-u.Input
-		// Update the value and pre-activation.
-		u.value[s.ID] += s.Value
-		u.preact += u.Weight[s.ID] * s.Value
-		delete(needRecv, s.ID)
-		Logf(3, "Recv %s -> %s (%.3e)\n", s.ID, u.ID, s.Value)
-	}
-
-	// Apply ReLU and fire activation.
-	act := math.Max(u.preact, 0.0)
-	for k := range u.Output {
-		u.Output[k] <- Signal{ID: u.ID, Value: act}
-		Logf(3, "Send %s -> %s (%.3e)\n", u.ID, k, act)
-	}
-}
-
-// Forward pass for input units.
-func (u *InputUnit) Forward() {
-	// Get single input value and broadcast to all downstream units.
-	u.preact = <-u.Input
-	Logf(3, "Recv input -> %s (%.3e)\n", u.ID, u.preact)
-	for k := range u.Output {
-		u.Output[k] <- Signal{ID: u.ID, Value: u.preact}
-		Logf(3, "Send %s -> %s (%.3e)\n", u.ID, k, u.preact)
-	}
-}
-
-// Forward pass for output units.
-func (u *OutputUnit) Forward() {
-	needRecv := make(map[string]bool)
-	for k := range u.Weight {
-		u.value[k] = 0.0
-		needRecv[k] = true
-	}
-	u.preact = u.Bias
-	// Get inputs from all incoming units and update the values and
-	// pre-activation.
-	for len(needRecv) > 0 {
-		s := <-u.Input
-		u.value[s.ID] += s.Value
-		u.preact += u.Weight[s.ID] * s.Value
-		delete(needRecv, s.ID)
-		Logf(3, "Recv %s -> %s (%.3e)\n", s.ID, u.ID, s.Value)
+func (u *Unit) forward() {
+	if u.Layer == InputLayer {
+		s := <-u.input
+		u.preact = s.value
+		Logf(3, "Recv input -> %s (%.3e)\n", u.ID, s.value)
+	} else {
+		// Zero out the previous activations, and note the units we need activations
+		// from.
+		needRecv := make(map[string]bool)
+		for k := range u.Weight {
+			u.value[k] = 0.0
+			needRecv[k] = true
+		}
+		// Initialize the pre-activation
+		u.preact = u.Bias
+		// Get inputs from all incoming units and add up pre-activation.
+		for len(needRecv) > 0 {
+			s := <-u.input
+			u.value[s.id] += s.value
+			u.preact += u.Weight[s.id] * s.value
+			delete(needRecv, s.id)
+			Logf(3, "Recv %s -> %s (%.3e)\n", s.id, u.ID, s.value)
+		}
 	}
 
 	// Fire activation
-	u.Output <- u.preact
-	Logf(3, "Send %s -> output (%.3e)\n", u.ID, u.preact)
+	act := u.preact
+	if u.Layer == HiddenLayer {
+		// Apply ReLU
+		act = math.Max(act, 0.0)
+	}
+	s := signal{id: u.ID, value: act}
+	if u.Layer == OutputLayer {
+		u.output[outputID] <- s
+		Logf(3, "Send %s -> output (%.3e)\n", u.ID, act)
+	} else {
+		for k := range u.output {
+			u.output[k] <- s
+			Logf(3, "Send %s -> %s (%.3e)\n", u.ID, k, act)
+		}
+	}
 }
 
-// Backward pass for hidden units. Waits for gradients from all downstream
+// Backward pass through the unit. Waits for gradients from all downstream
 // connections, updates weight gradients, and back-propagates.
-func (u *HiddenUnit) Backward() {
-	grad := 0.0
-	needRecv := make(map[string]bool)
-	for k := range u.Output {
-		needRecv[k] = true
-	}
-	for len(needRecv) > 0 {
-		// Get a grad from one of the output connections.
-		s := <-u.InputB
-		// Accumulate gradient wrt output.
-		grad += s.Value
-		delete(needRecv, s.ID)
-		Logf(3, "Recv grad %s -> %s (%.3e)\n", s.ID, u.ID, s.Value)
-	}
-
-	// Chain rule through ReLU.
-	if u.preact <= 0 {
+func (u *Unit) backward() {
+	var grad float64
+	if u.Layer == OutputLayer {
+		s := <-u.inputB
+		grad = s.value
+		Logf(3, "Recv grad loss -> %s (%.3e)\n", u.ID, grad)
+	} else {
 		grad = 0.0
-		Logf(3, "Zero grad; ReLU")
+		needRecv := make(map[string]bool)
+		for k := range u.output {
+			needRecv[k] = true
+		}
+		for len(needRecv) > 0 {
+			// Get a grad from one of the output connections.
+			s := <-u.inputB
+			// Accumulate gradient wrt output.
+			grad += s.value
+			delete(needRecv, s.id)
+			Logf(3, "Recv grad %s -> %s (%.3e)\n", s.id, u.ID, s.value)
+		}
 	}
 
-	// If the unit didn't "fire", no real gradients. But still need to do backprop
-	// for synchronization purposes.
-	for k := range u.Weight {
-		u.gradWeight[k] += grad * u.value[k]
-		u.OutputB[k] <- Signal{ID: u.ID, Value: grad * u.Weight[k]}
-		Logf(3, "Send grad %s -> %s (%.3e)\n", u.ID, k, grad*u.Weight[k])
+	// Backprop. If the unit didn't "fire", no real gradients. But still need to
+	// do backprop for synchronization purposes.
+	if u.Layer != InputLayer {
+		// Chain rule for ReLU.
+		if u.Layer == HiddenLayer && u.preact <= 0 {
+			grad = 0.0
+		}
+		// Chain rule for weights.
+		for k := range u.Weight {
+			u.gradWeight[k] += grad * u.value[k]
+			u.outputB[k] <- signal{id: u.ID, value: grad * u.Weight[k]}
+			Logf(3, "Send grad %s -> %s (%.3e)\n", u.ID, k, grad*u.Weight[k])
+		}
+		u.gradBias += grad
 	}
-	u.gradBias += grad
 }
 
-// Backward pass for input units. Accumulates gradients wrt inputs and forwards
-// to output channel. Used to signal end of backward pass.
-func (u *InputUnit) Backward() {
-	grad := 0.0
-	needRecv := make(map[string]bool)
-	for k := range u.Output {
-		needRecv[k] = true
+// Update the weights and bias by taking a gradient descent step.
+func (u *Unit) step(lr float64) {
+	if u.Layer != InputLayer {
+		for k := range u.Weight {
+			// TODO: Might want to generalize this to other optimizer updates.
+			u.Weight[k] -= lr * u.gradWeight[k]
+			u.gradWeight[k] = 0.0
+		}
+		u.Bias -= lr * u.gradBias
+		u.gradBias = 0.0
 	}
-	for len(needRecv) > 0 {
-		// Get a grad from one of the output connections.
-		s := <-u.InputB
-		// Accumulate gradient wrt output.
-		grad += s.Value
-		delete(needRecv, s.ID)
-		Logf(3, "Recv grad %s -> %s (%.3e)\n", s.ID, u.ID, s.Value)
-	}
-
-	// Send out accumulated grad.
-	u.OutputB <- grad
-	Logf(3, "Send grad %s -> output (%.3e)\n", u.ID, grad)
-}
-
-// Backward pass for output units.
-func (u *OutputUnit) Backward() {
-	// Get a grad from the (only) output connection.
-	grad := <-u.InputB
-	Logf(3, "Recv grad loss -> %s (%.3e)\n", u.ID, grad)
-
-	for k := range u.Weight {
-		u.gradWeight[k] += grad * u.value[k]
-		u.OutputB[k] <- Signal{ID: u.ID, Value: grad * u.Weight[k]}
-		Logf(3, "Send grad %s -> %s (%.3e)\n", u.ID, k, grad*u.Weight[k])
-	}
-	u.gradBias += grad
-}
-
-// Step for hidden units. Updates weights and bias with negative gradient step.
-// TODO: There's currently nothing to make sure that we finish a step before the
-// next forward starts.
-func (u *HiddenUnit) Step(lr float64) {
-	for k := range u.Weight {
-		// TODO: Might want to generalize this to other optimizer updates.
-		u.Weight[k] -= lr * u.gradWeight[k]
-		u.gradWeight[k] = 0.0
-	}
-	u.Bias -= lr * u.gradBias
-	u.gradBias = 0.0
 	Logf(3, "Step %s\n", u.ID)
 }
 
-// Step for input units. (Do nothing.)
-func (u *InputUnit) Step(lr float64) {}
-
-// Step for output units. (Same as for hidden.)
-func (u *OutputUnit) Step(lr float64) {
-	for k := range u.Weight {
-		u.Weight[k] -= lr * u.gradWeight[k]
-		u.gradWeight[k] = 0.0
+// Start starts an endless loop of forward and backward passes with periodic
+// gradient updates.
+func (u *Unit) start(train bool, updateFreq int, lr float64) {
+	step := 1
+	for {
+		u.forward()
+		if train {
+			u.backward()
+			if updateFreq > 0 && step%updateFreq == 0 {
+				u.step(lr)
+			}
+			u.stepDone <- 1
+		}
+		step++
 	}
-	u.Bias -= lr * u.gradBias
-	u.gradBias = 0.0
-	Logf(3, "Step %s\n", u.ID)
 }
