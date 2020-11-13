@@ -1,3 +1,4 @@
 .scratch
 .vscode
 *.out
+.DS_Store

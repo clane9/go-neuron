@@ -18,6 +18,8 @@ func NewMLP(arch []int) *Net {
 	// Check for valid architecture
 	numLayers := len(arch)
 	if numLayers < 3 {
+		// TODO: These should be errors, not panics. Also, add error handling
+		// elsewhere as needed.
 		panic(fmt.Sprintf("MLP architectures need >= 2 layers; got %d",
 			numLayers))
 	}
@@ -75,7 +77,7 @@ func (n *Net) Forward(data []float64) (output []float64) {
 			inDim, n.Arch[0]))
 	}
 
-	Logf(1, "MLP Forward\n")
+	Logf(2, "MLP Forward\n")
 
 	// Feed in.
 	for ii, v := range data {
@@ -103,7 +105,7 @@ func (n *Net) Backward(grad []float64) {
 			gradDim, outDim))
 	}
 
-	Logf(1, "MLP Backward\n")
+	Logf(2, "MLP Backward\n")
 
 	// Feed in (backward).
 	numLayers := len(n.Arch)
@@ -121,7 +123,7 @@ func (n *Net) Sync() {
 	for ii := 0; ii < totalUnits; ii++ {
 		<-n.stepDone
 	}
-	Logf(1, "MLP Step done\n")
+	Logf(2, "MLP Step done\n")
 }
 
 // Start running each unit's forward/backward/step loop concurrently.

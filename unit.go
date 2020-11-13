@@ -117,21 +117,17 @@ func (u *Unit) forward() {
 		u.preact = s.value
 		Logf(3, "Recv input -> %s (%.3e)\n", u.ID, s.value)
 	} else {
-		// Zero out the previous activations, and note the units we need activations
-		// from.
-		needRecv := make(map[string]bool)
+		// Zero out the previous activations and initialize the pre-activation.
 		for k := range u.Weight {
 			u.value[k] = 0.0
-			needRecv[k] = true
 		}
-		// Initialize the pre-activation
 		u.preact = u.Bias
 		// Get inputs from all incoming units and add up pre-activation.
-		for len(needRecv) > 0 {
+		// NOTE: assuming only one received activation per input unit.
+		for ii := 0; ii < len(u.Weight); ii++ {
 			s := <-u.input
-			u.value[s.id] += s.value
+			u.value[s.id] = s.value
 			u.preact += u.Weight[s.id] * s.value
-			delete(needRecv, s.id)
 			Logf(3, "Recv %s -> %s (%.3e)\n", s.id, u.ID, s.value)
 		}
 	}
@@ -163,17 +159,12 @@ func (u *Unit) backward() {
 		grad = s.value
 		Logf(3, "Recv grad loss -> %s (%.3e)\n", u.ID, grad)
 	} else {
+		// Get grads from all output connections.
 		grad = 0.0
-		needRecv := make(map[string]bool)
-		for k := range u.output {
-			needRecv[k] = true
-		}
-		for len(needRecv) > 0 {
-			// Get a grad from one of the output connections.
+		for ii := 0; ii < len(u.output); ii++ {
 			s := <-u.inputB
 			// Accumulate gradient wrt output.
 			grad += s.value
-			delete(needRecv, s.id)
 			Logf(3, "Recv grad %s -> %s (%.3e)\n", s.id, u.ID, s.value)
 		}
 	}
@@ -185,7 +176,7 @@ func (u *Unit) backward() {
 		if u.Layer == HiddenLayer && u.preact <= 0 {
 			grad = 0.0
 		}
-		// Chain rule for weights.
+		// Chain rule for weights and backprop.
 		for k := range u.Weight {
 			u.gradWeight[k] += grad * u.value[k]
 			u.outputB[k] <- signal{id: u.ID, value: grad * u.Weight[k]}
@@ -220,8 +211,8 @@ func (u *Unit) start(train bool, updateFreq int, lr float64) {
 			if updateFreq > 0 && step%updateFreq == 0 {
 				u.step(lr)
 			}
-			u.stepDone <- 1
 		}
 		step++
+		u.stepDone <- 1
 	}
 }
