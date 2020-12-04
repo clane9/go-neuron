@@ -1,3 +1,11 @@
+// Package neuron implements multi-layer neural networks with concurrent
+// neurons.
+//
+// Individual neurons (neuron.Unit) execute independently using goroutines and
+// communicate via channels--both forwards and backwards. Networks (neuron.Net)
+// consist of multiple fully-connected layers of neurons. SGD is used for
+// training. Mini-batches are simulated by accumulating gradients over several
+// forward evaluations.
 package neuron
 
 import (
@@ -5,8 +13,9 @@ import (
 	"math/rand"
 )
 
-// A Unit is a single neuron unit with weights and input/output channels for
-// forward and backward.
+// A Unit is a single neuron unit with weights, a bias, and input/output
+// channels for forward and backward. Weights are represented as maps from
+// string unit IDs to values.
 type Unit struct {
 	ID     string
 	Layer  UnitLayer
@@ -31,6 +40,10 @@ type Unit struct {
 }
 
 // A UnitLayer defines the type of layer that a unit belongs to.
+//
+// There are three types of units: input, hidden, and output. Hidden units use
+// ReLU activation, whereas the other types are linear. Input units do not have
+// weights.
 type UnitLayer int
 
 const (
@@ -112,23 +125,18 @@ func initWeight() float64 {
 // Forward pass through the unit. Collects input from all incoming units and
 // fires an activation.
 func (u *Unit) forward() {
+	var s signal
 	if u.Layer == InputLayer {
-		s := <-u.input
+		s = <-u.input
 		u.preact = s.value
-		Logf(3, "Recv input -> %s (%.3e)\n", u.ID, s.value)
 	} else {
-		// Zero out the previous activations and initialize the pre-activation.
-		for k := range u.Weight {
-			u.value[k] = 0.0
-		}
-		u.preact = u.Bias
 		// Get inputs from all incoming units and add up pre-activation.
 		// NOTE: assuming only one received activation per input unit.
+		u.preact = u.Bias
 		for ii := 0; ii < len(u.Weight); ii++ {
-			s := <-u.input
+			s = <-u.input
 			u.value[s.id] = s.value
 			u.preact += u.Weight[s.id] * s.value
-			Logf(3, "Recv %s -> %s (%.3e)\n", s.id, u.ID, s.value)
 		}
 	}
 
@@ -138,14 +146,12 @@ func (u *Unit) forward() {
 		// Apply ReLU
 		act = math.Max(act, 0.0)
 	}
-	s := signal{id: u.ID, value: act}
+	s = signal{id: u.ID, value: act}
 	if u.Layer == OutputLayer {
 		u.output[outputID] <- s
-		Logf(3, "Send %s -> output (%.3e)\n", u.ID, act)
 	} else {
 		for k := range u.output {
 			u.output[k] <- s
-			Logf(3, "Send %s -> %s (%.3e)\n", u.ID, k, act)
 		}
 	}
 }
@@ -154,18 +160,17 @@ func (u *Unit) forward() {
 // connections, updates weight gradients, and back-propagates.
 func (u *Unit) backward() {
 	var grad float64
+	var s signal
 	if u.Layer == OutputLayer {
-		s := <-u.inputB
+		s = <-u.inputB
 		grad = s.value
-		Logf(3, "Recv grad loss -> %s (%.3e)\n", u.ID, grad)
 	} else {
 		// Get grads from all output connections.
 		grad = 0.0
 		for ii := 0; ii < len(u.output); ii++ {
-			s := <-u.inputB
+			s = <-u.inputB
 			// Accumulate gradient wrt output.
 			grad += s.value
-			Logf(3, "Recv grad %s -> %s (%.3e)\n", s.id, u.ID, s.value)
 		}
 	}
 
@@ -180,7 +185,6 @@ func (u *Unit) backward() {
 		for k := range u.Weight {
 			u.gradWeight[k] += grad * u.value[k]
 			u.outputB[k] <- signal{id: u.ID, value: grad * u.Weight[k]}
-			Logf(3, "Send grad %s -> %s (%.3e)\n", u.ID, k, grad*u.Weight[k])
 		}
 		u.gradBias += grad
 	}
@@ -197,7 +201,6 @@ func (u *Unit) step(lr float64) {
 		u.Bias -= lr * u.gradBias
 		u.gradBias = 0.0
 	}
-	Logf(3, "Step %s\n", u.ID)
 }
 
 // Start starts an endless loop of forward and backward passes with periodic

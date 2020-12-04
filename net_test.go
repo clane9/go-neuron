@@ -39,7 +39,6 @@ func TestMLP(t *testing.T) {
 	n.Start(true, 1, 1.0)
 	output := n.Forward([]float64{1.123, -2.234})
 	n.Backward([]float64{1.0})
-	n.Sync()
 
 	const outWant = 8.4846442116e-05
 	neuron.Logf(1, "Output: %v\n", output)
@@ -48,6 +47,10 @@ func TestMLP(t *testing.T) {
 	}
 }
 
+// Benchmark a full forward/backward/step loop.
+// This is pretty slow! 3.4 ms per op, compared to 0.4 ms in pytorch (using the
+// same architecture and machine, cpu only). Not all that surprising, matrix
+// multiplication is very efficient after all.
 func BenchmarkMLP(b *testing.B) {
 	neuron.Verbosity = 0
 
@@ -71,6 +74,5 @@ func BenchmarkMLP(b *testing.B) {
 	for ii := 0; ii < b.N; ii++ {
 		n.Forward(input)
 		n.Backward(grad)
-		n.Sync()
 	}
 }
