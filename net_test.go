@@ -1,6 +1,7 @@
 package neuron_test
 
 import (
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -9,7 +10,7 @@ import (
 
 // Test construction of a new MLP network
 func TestNewMLP(t *testing.T) {
-	neuron.Logf(1, "Running TestNewMLP\n")
+	fmt.Printf("Running TestNewMLP\n")
 
 	arch := []int{2, 4, 4, 1}
 	n := neuron.NewMLP(arch)
@@ -28,7 +29,7 @@ func TestNewMLP(t *testing.T) {
 
 // Test full forward/backward/step loop for the entire MLP.
 func TestMLP(t *testing.T) {
-	neuron.Logf(1, "Running TestMLP\n")
+	fmt.Printf("Running TestMLP\n")
 
 	// Seed rand so we get the same weights.
 	rand.Seed(12)
@@ -41,7 +42,7 @@ func TestMLP(t *testing.T) {
 	n.Backward([]float64{1.0})
 
 	const outWant = 8.4846442116e-05
-	neuron.Logf(1, "Output: %v\n", output)
+	fmt.Printf("Output: %v\n", output)
 	if !almostEqual(output[0], outWant) {
 		t.Errorf("MLP output is %.10e; expected %.4e", output[0], outWant)
 	}

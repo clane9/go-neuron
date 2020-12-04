@@ -1,11 +1,9 @@
 // Package neuron implements multi-layer neural networks with concurrent
 // neurons.
 //
-// Individual neurons (neuron.Unit) execute independently using goroutines and
-// communicate via channels--both forwards and backwards. Networks (neuron.Net)
-// consist of multiple fully-connected layers of neurons. SGD is used for
-// training. Mini-batches are simulated by accumulating gradients over several
-// forward evaluations.
+// Individual neurons execute independently using goroutines and communicate via
+// channels--both forwards and backwards. Networks consist of multiple
+// fully-connected layers of neurons. SGD is used for training.
 package neuron
 
 import (
@@ -17,7 +15,8 @@ import (
 // channels for forward and backward. Weights are represented as maps from
 // string unit IDs to values.
 type Unit struct {
-	ID     string
+	ID string
+	// Layer the unit belongs to
 	Layer  UnitLayer
 	preact float64
 	// Weights for each input connection.
@@ -98,7 +97,7 @@ func newUnit(id string, layer UnitLayer, stepDone chan int) *Unit {
 	if layer == OutputLayer {
 		u.output[outputID] = make(chan signal, 1)
 	}
-	Logf(2, "New unit %s\n", id)
+	logf(2, "New unit %s\n", id)
 	return &u
 }
 
@@ -112,7 +111,7 @@ func connect(u1, u2 *Unit) {
 	// Create backward connection from u1 <- u2 by giving u2 a reference to u1's
 	// backward input channel.
 	u2.outputB[u1.ID] = u1.inputB
-	Logf(2, "Connect: %s -> %s\n", u1.ID, u2.ID)
+	logf(2, "Connect: %s -> %s\n", u1.ID, u2.ID)
 }
 
 // Initialize a weight value by sampling randomly from [-0.01, 0.01).

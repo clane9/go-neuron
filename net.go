@@ -8,7 +8,9 @@ import (
 // contains one or more Units. Arch defines the layer sizes. Layers points to
 // each of the units in each of the layers.
 type Net struct {
-	Arch     []int
+	// Size of each layer
+	Arch []int
+	// Pointers to the units in each layer
 	Layers   [][](*Unit)
 	stepDone chan int
 }
@@ -35,7 +37,7 @@ func NewMLP(arch []int) *Net {
 		stepDone: make(chan int),
 	}
 
-	Logf(1, "Building a %d layer network.\n  Arch=%v\n", numLayers, arch)
+	logf(1, "Building a %d layer network.\n  Arch=%v\n", numLayers, arch)
 	copy(n.Arch, arch)
 
 	// Make layers.
@@ -79,7 +81,7 @@ func (n *Net) Forward(data []float64) (output []float64) {
 			inDim, n.Arch[0]))
 	}
 
-	Logf(2, "MLP Forward\n")
+	logf(2, "MLP Forward\n")
 
 	// Feed in.
 	for ii, v := range data {
@@ -109,7 +111,7 @@ func (n *Net) Backward(grad []float64) {
 			gradDim, outDim))
 	}
 
-	Logf(2, "MLP Backward\n")
+	logf(2, "MLP Backward\n")
 
 	// Feed in (backward).
 	numLayers := len(n.Arch)
@@ -140,7 +142,7 @@ func (n *Net) Start(train bool, updateFreq int, lr float64) {
 	for _, l := range n.Layers {
 		for _, u := range l {
 			go u.start(train, updateFreq, lr)
-			Logf(2, "Start %s\n", u.ID)
+			logf(2, "Start %s\n", u.ID)
 		}
 	}
 }
