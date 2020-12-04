@@ -2,8 +2,10 @@
 
 Multi-layer neural networks with concurrent neurons.
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/clane9/go-neuron)](https://goreportcard.com/report/github.com/clane9/go-neuron)
 [![GoDoc](https://godoc.org/github.com/clane9/go-neuron?status.svg)](https://godoc.org/github.com/clane9/go-neuron)
+[![Build Status](https://travis-ci.com/clane9/go-neuron.svg?branch=main)](https://travis-ci.com/clane9/go-neuron?branch=main)
+[![Go Report Card](https://goreportcard.com/badge/github.com/clane9/go-neuron)](https://goreportcard.com/report/github.com/clane9/go-neuron)
+[![codecov](https://codecov.io/gh/clane9/go-neuron/branch/main/graph/badge.svg)](https://codecov.io/gh/clane9/go-neuron)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Individual neurons execute independently using goroutines and communicate via
