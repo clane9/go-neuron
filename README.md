@@ -44,11 +44,12 @@ func main() {
 
 ## Performance
 
-By representing neurons as independent computational units, we can naturally take advantage of multi-core CPUs. For example, `gaussian_data.go` achieves near linear speedup with increasing `GOMAXPROCS` on a quad-core MBP.
+Because our neurons run concurrently, we can achieve some speedup with
+multi-core CPUs. When compared to standard deep learning frameworks however, the
+implementation is pretty slow. ([`BenchmarkMLP`](net_test.go) runs ~10x faster
+in `pytorch` on the same hardware.)
 
-When compared to standard deep learning frameworks however, the implementation is pretty slow. ([`BenchmarkMLP`](net_test.go) runs ~10x faster in `pytorch` on the same hardware.) This is not all that surprising. Matrix multiplication is very efficient after all.
-
-## Similar alternatives
+## Similar projects
 
 - [Varis](https://github.com/Xamber/Varis)
 - [gonn](https://github.com/fxsjy/gonn)

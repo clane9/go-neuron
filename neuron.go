@@ -18,12 +18,12 @@ type Unit struct {
 	ID string
 	// Layer the unit belongs to
 	Layer  UnitLayer
-	preact float64
 	// Weights for each input connection.
 	Weight map[string]float64
 	Bias   float64
 	// Values for each input connection.
 	value map[string]float64
+	preact float64
 	// Accumulated gradients for weights and bias.
 	gradWeight map[string]float64
 	gradBias   float64

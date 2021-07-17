@@ -61,8 +61,6 @@ func NewMLP(arch []int) *Net {
 	}
 
 	// Connect all the layers in a fully-connected pattern.
-	// TODO: Would be nice to also implement local receptive field connectivity,
-	// as in CNNs.
 	for ii := 0; ii < numLayers-1; ii++ {
 		for _, u1 := range n.Layers[ii] {
 			for _, u2 := range n.Layers[ii+1] {
