@@ -22,10 +22,11 @@ func main() {
 
 	// MLP with two 128-dim hidden layers.
 	arch := []int{inDim, 128, 128, outDim}
-	n := neuron.NewMLP(arch)
+	opt := neuron.NewSGD(1.0e-03, 0.0, 0.0)
+	n := neuron.NewMLP(arch, opt)
 	// Start the network running for training. Gradients accumulate for 32 inputs
 	// before updating. (This is equivalent to mini-batch gradient descent.)
-	n.Start(true, 32, 1.0e-03)
+	n.Start(true, 32)
 
 	var (
 		data   []float64

@@ -7,7 +7,7 @@
 package neuron
 
 import (
-	"math"
+	"fmt"
 	"math/rand"
 )
 
@@ -15,18 +15,11 @@ import (
 // channels for forward and backward. Weights are represented as maps from
 // string unit IDs to values.
 type Unit struct {
-	ID string
-	// Layer the unit belongs to
-	Layer  UnitLayer
-	// Weights for each input connection.
-	Weight map[string]float64
-	Bias   float64
-	// Values for each input connection.
-	value map[string]float64
-	preact float64
-	// Accumulated gradients for weights and bias.
-	gradWeight map[string]float64
-	gradBias   float64
+	ID    string
+	W     *Weight
+	nin   int
+	activ Activation
+	opt   Optimizer
 	// Single input channel.
 	input chan signal
 	// output channels for each downstream connection.
@@ -38,21 +31,47 @@ type Unit struct {
 	stepDone chan int
 }
 
-// A UnitLayer defines the type of layer that a unit belongs to.
-//
-// There are three types of units: input, hidden, and output. Hidden units use
-// ReLU activation, whereas the other types are linear. Input units do not have
-// weights.
-type UnitLayer int
+// A Weight represents a neuron's weight map.
+type Weight struct {
+	Params map[string]Param
+}
 
-const (
-	// InputLayer is for input units (no weights)
-	InputLayer UnitLayer = iota
-	// HiddenLayer is for hidden units (weights and ReLU)
-	HiddenLayer
-	// OutputLayer is for output units (weights and no ReLU)
-	OutputLayer
-)
+func (w *Weight) init(id string, data float64, requiresGrad bool) {
+	w.Params[id] = Param{
+		Data:         data,
+		RequiresGrad: requiresGrad,
+	}
+}
+
+func (w *Weight) forward(id string, value float64) float64 {
+	p, ok := w.Params[id]
+	if !ok {
+		return 0.0
+	}
+	if p.RequiresGrad {
+		p.value = value
+	}
+	return p.Data * value
+}
+
+func (w *Weight) backward(id string, grad float64) float64 {
+	p, ok := w.Params[id]
+	if !ok {
+		return 0.0
+	}
+	if p.RequiresGrad {
+		p.grad += grad * p.value
+	}
+	return p.Data * grad
+}
+
+// NewWeight creates a new weight map.
+func NewWeight() *Weight {
+	w := Weight{
+		Params: make(map[string]Param),
+	}
+	return &w
+}
 
 // signals are used to communicate between neuron Units.
 type signal struct {
@@ -60,158 +79,144 @@ type signal struct {
 	value float64
 }
 
-// special ID for input and output channels.
-const inputID = "INPUT"
-const outputID = "OUTPUT"
+// special IDs for input and output channels and bias parameters.
+const (
+	inputID  = "_INPUT"
+	outputID = "_OUTPUT"
+	biasID   = "_BIAS"
+)
+
+func newInputUnit(id string, stepDone chan int) *Unit {
+	activ := new(Identity)
+	u := newUnit(id, activ, stepDone)
+	u.feedIn()
+	return u
+}
+
+func newHiddenUnit(id string, stepDone chan int) *Unit {
+	activ := new(Relu)
+	u := newUnit(id, activ, stepDone)
+	u.W.init(biasID, 0.1, true)
+	return u
+}
+
+func newOutputUnit(id string, stepDone chan int) *Unit {
+	activ := new(Identity)
+	u := newUnit(id, activ, stepDone)
+	u.W.init(biasID, 0.1, true)
+	u.feedOut()
+	return u
+}
 
 // Create a new Unit with a given string id and layer type.
-func newUnit(id string, layer UnitLayer, stepDone chan int) *Unit {
-	// Set defaults depending on layer.
-	bias := 0.0
-	inCap := 512
-	inCapB := 512
-	switch layer {
-	case InputLayer:
-		inCap = 1
-	case HiddenLayer:
-		bias = 0.1
-	case OutputLayer:
-		inCapB = 1
-	}
-
+func newUnit(id string, activ Activation, stepDone chan int) *Unit {
 	u := Unit{
-		ID:         id,
-		Layer:      layer,
-		Weight:     make(map[string]float64),
-		Bias:       bias,
-		value:      make(map[string]float64),
-		gradWeight: make(map[string]float64),
-		input:      make(chan signal, inCap),
-		output:     make(map[string](chan signal)),
-		inputB:     make(chan signal, inCapB),
-		outputB:    make(map[string](chan signal)),
-		stepDone:   stepDone,
+		ID:       id,
+		W:        NewWeight(),
+		activ:    activ,
+		input:    make(chan signal),
+		output:   make(map[string](chan signal)),
+		inputB:   make(chan signal),
+		outputB:  make(map[string](chan signal)),
+		stepDone: stepDone,
 	}
 
-	// Add a special output channel.
-	if layer == OutputLayer {
-		u.output[outputID] = make(chan signal, 1)
-	}
 	logf(2, "New unit %s\n", id)
 	return &u
 }
 
-// connect two units together in series: u1 -> u2.
-func connect(u1, u2 *Unit) {
-	// Create forward connection from u1 -> u2 by giving u1 a reference to u2's
-	// input channel.
-	u1.output[u2.ID] = u2.input
-	// Initialize a weight value for u1 -> u2.
-	u2.Weight[u1.ID] = initWeight()
-	// Create backward connection from u1 <- u2 by giving u2 a reference to u1's
-	// backward input channel.
-	u2.outputB[u1.ID] = u1.inputB
-	logf(2, "Connect: %s -> %s\n", u1.ID, u2.ID)
+// Connect two units together in series: u1 -> u2.
+func (u *Unit) connect(u2 *Unit) {
+	u.output[u2.ID] = u2.input
+	u2.W.init(u.ID, randUnif(-0.01, 0.01), true)
+	u2.outputB[u.ID] = u.inputB
+	u2.nin++
+	logf(2, "Connect: %s -> %s\n", u.ID, u2.ID)
+}
+
+// Create an input connection to a unit.
+func (u *Unit) feedIn() {
+	u.W.init(inputID, 1.0, false)
+	u.nin++
+}
+
+// Create an output channel from a unit.
+func (u *Unit) feedOut() {
+	u.output[outputID] = make(chan signal)
 }
 
 // Initialize a weight value by sampling randomly from [-0.01, 0.01).
-func initWeight() float64 {
+func randUnif(a, b float64) float64 {
 	w := rand.Float64()
-	w = 0.02*w - 0.01
+	w = a + (b-a)*w
 	return w
+}
+
+func (u *Unit) setOptimizer(opt Optimizer) {
+	u.opt = opt.New()
 }
 
 // Forward pass through the unit. Collects input from all incoming units and
 // fires an activation.
 func (u *Unit) forward() {
 	var s signal
-	if u.Layer == InputLayer {
+	// Accumulate weighted inputs from input connections.
+	// NOTE: assuming only one received activation per input unit.
+	act := u.W.forward(biasID, 1.0)
+	for ii := 0; ii < u.nin; ii++ {
 		s = <-u.input
-		u.preact = s.value
-	} else {
-		// Get inputs from all incoming units and add up pre-activation.
-		// NOTE: assuming only one received activation per input unit.
-		u.preact = u.Bias
-		for ii := 0; ii < len(u.Weight); ii++ {
-			s = <-u.input
-			u.value[s.id] = s.value
-			u.preact += u.Weight[s.id] * s.value
-		}
+		act += u.W.forward(s.id, s.value)
 	}
 
 	// Fire activation
-	act := u.preact
-	if u.Layer == HiddenLayer {
-		// Apply ReLU
-		act = math.Max(act, 0.0)
-	}
+	act = u.activ.Forward(act)
 	s = signal{id: u.ID, value: act}
-	if u.Layer == OutputLayer {
-		u.output[outputID] <- s
-	} else {
-		for k := range u.output {
-			u.output[k] <- s
-		}
+	for k := range u.output {
+		u.output[k] <- s
 	}
 }
 
 // Backward pass through the unit. Waits for gradients from all downstream
 // connections, updates weight gradients, and back-propagates.
 func (u *Unit) backward() {
-	var grad float64
 	var s signal
-	if u.Layer == OutputLayer {
+	// Accumulate grads from all output connections.
+	grad := 0.0
+	for ii := 0; ii < len(u.output); ii++ {
 		s = <-u.inputB
-		grad = s.value
-	} else {
-		// Get grads from all output connections.
-		grad = 0.0
-		for ii := 0; ii < len(u.output); ii++ {
-			s = <-u.inputB
-			// Accumulate gradient wrt output.
-			grad += s.value
-		}
+		grad += s.value
 	}
 
-	// Backprop. If the unit didn't "fire", no real gradients. But still need to
-	// do backprop for synchronization purposes.
-	if u.Layer != InputLayer {
-		// Chain rule for ReLU.
-		if u.Layer == HiddenLayer && u.preact <= 0 {
-			grad = 0.0
+	// Backprop.
+	grad = u.activ.Backward(grad)
+	for k := range u.W.Params {
+		gradi := u.W.backward(k, grad)
+		if c, ok := u.outputB[k]; ok {
+			c <- signal{id: u.ID, value: gradi}
 		}
-		// Chain rule for weights and backprop.
-		for k := range u.Weight {
-			u.gradWeight[k] += grad * u.value[k]
-			u.outputB[k] <- signal{id: u.ID, value: grad * u.Weight[k]}
-		}
-		u.gradBias += grad
 	}
 }
 
 // Update the weights and bias by taking a gradient descent step.
-func (u *Unit) step(lr float64) {
-	if u.Layer != InputLayer {
-		for k := range u.Weight {
-			// TODO: Might want to generalize this to other optimizer updates.
-			u.Weight[k] -= lr * u.gradWeight[k]
-			u.gradWeight[k] = 0.0
-		}
-		u.Bias -= lr * u.gradBias
-		u.gradBias = 0.0
+func (u *Unit) step() {
+	if u.opt == nil {
+		panic(fmt.Sprintf("Unit %s optimizer is uninitialized!", u.ID))
+	}
+	for k, p := range u.W.Params {
+		u.opt.Step(k, &p)
 	}
 }
 
 // Start starts an endless loop of forward and backward passes with periodic
 // gradient updates.
-func (u *Unit) start(train bool, updateFreq int, lr float64) {
+func (u *Unit) start(train bool, updateFreq int) {
 	step := 1
 	for {
 		u.forward()
 		if train {
 			u.backward()
 			if updateFreq > 0 && step%updateFreq == 0 {
-				u.step(lr)
+				u.step()
 			}
 		}
 		step++

@@ -13,7 +13,8 @@ func TestNewMLP(t *testing.T) {
 	fmt.Printf("Running TestNewMLP\n")
 
 	arch := []int{2, 4, 4, 1}
-	n := neuron.NewMLP(arch)
+	opt := neuron.NewSGD(1.0, 0.0, 0.0)
+	n := neuron.NewMLP(arch, opt)
 	for ii, sz := range arch {
 		if n.Arch[ii] != sz {
 			t.Errorf("Layer %d size is %d; expected %d", ii, n.Arch[ii], sz)
@@ -22,9 +23,9 @@ func TestNewMLP(t *testing.T) {
 
 	// Check that invalid architectures are checked.
 	arch = []int{2, 4}
-	assertPanic(t, func() { neuron.NewMLP(arch) })
+	assertPanic(t, func() { neuron.NewMLP(arch, opt) })
 	arch = []int{2, 4, -1}
-	assertPanic(t, func() { neuron.NewMLP(arch) })
+	assertPanic(t, func() { neuron.NewMLP(arch, opt) })
 }
 
 // Test full forward/backward/step loop for the entire MLP.
@@ -35,9 +36,10 @@ func TestMLP(t *testing.T) {
 	rand.Seed(12)
 
 	arch := []int{2, 3, 2, 1}
-	n := neuron.NewMLP(arch)
+	opt := neuron.NewSGD(1.0, 0.0, 0.0)
+	n := neuron.NewMLP(arch, opt)
 
-	n.Start(true, 1, 1.0)
+	n.Start(true, 1)
 	output := n.Forward([]float64{1.123, -2.234})
 	n.Backward([]float64{1.0})
 
@@ -61,7 +63,9 @@ func BenchmarkMLP(b *testing.B) {
 	const inDim = 64
 	const outDim = 1
 	arch := []int{inDim, 128, 128, outDim}
-	n := neuron.NewMLP(arch)
+	// lr set to 0 so we don't acually update the weights
+	opt := neuron.NewSGD(0.0, 0.0, 0.0)
+	n := neuron.NewMLP(arch, opt)
 
 	input := make([]float64, inDim)
 	for ii := 0; ii < inDim; ii++ {
@@ -69,8 +73,7 @@ func BenchmarkMLP(b *testing.B) {
 	}
 	grad := []float64{1.0}
 
-	// lr set to 0 so we don't acually update the weights
-	n.Start(true, 1, 0.0)
+	n.Start(true, 1)
 
 	for ii := 0; ii < b.N; ii++ {
 		n.Forward(input)

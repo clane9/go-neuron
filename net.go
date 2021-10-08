@@ -16,7 +16,7 @@ type Net struct {
 }
 
 // NewMLP constructs a new fully-connected network with the given architecture.
-func NewMLP(arch []int) *Net {
+func NewMLP(arch []int, opt Optimizer) *Net {
 	// Check for valid architecture
 	numLayers := len(arch)
 	if numLayers < 3 {
@@ -42,20 +42,22 @@ func NewMLP(arch []int) *Net {
 
 	// Make layers.
 	const idFormStr = "%03d_%06d"
+	var id string
+	var u *Unit
 	for ii := 0; ii < numLayers; ii++ {
-		var layer UnitLayer
-		switch ii {
-		case 0:
-			layer = InputLayer
-		case numLayers - 1:
-			layer = OutputLayer
-		default:
-			layer = HiddenLayer
-		}
 		l := make([]*Unit, arch[ii])
 		for jj := 0; jj < arch[ii]; jj++ {
-			id := fmt.Sprintf(idFormStr, ii, jj)
-			l[jj] = newUnit(id, layer, n.stepDone)
+			id = fmt.Sprintf(idFormStr, ii, jj)
+			switch ii {
+			case 0:
+				u = newInputUnit(id, n.stepDone)
+			case numLayers - 1:
+				u = newOutputUnit(id, n.stepDone)
+			default:
+				u = newHiddenUnit(id, n.stepDone)
+			}
+			u.setOptimizer(opt)
+			l[jj] = u
 		}
 		n.Layers[ii] = l
 	}
@@ -64,7 +66,7 @@ func NewMLP(arch []int) *Net {
 	for ii := 0; ii < numLayers-1; ii++ {
 		for _, u1 := range n.Layers[ii] {
 			for _, u2 := range n.Layers[ii+1] {
-				connect(u1, u2)
+				u1.connect(u2)
 			}
 		}
 	}
@@ -133,13 +135,12 @@ func (n *Net) sync() {
 }
 
 // Start running each unit's forward/backward/step loop concurrently. Neuron
-// weights and biases are updated by SGD with a fixed learning rate (lr) every
-// updateFreq iterations. By setting updateFreq > 1, we can simulate mini-batch
-// SGD.
-func (n *Net) Start(train bool, updateFreq int, lr float64) {
+// weights and biases are updated every updateFreq iterations. By setting
+// updateFreq > 1, we can simulate mini-batch optimization.
+func (n *Net) Start(train bool, updateFreq int) {
 	for _, l := range n.Layers {
 		for _, u := range l {
-			go u.start(train, updateFreq, lr)
+			go u.start(train, updateFreq)
 			logf(2, "Start %s\n", u.ID)
 		}
 	}
