@@ -33,14 +33,15 @@ func (opt *SGD) Step(id string, p *Param) {
 		v, ok = opt.buf[id]
 		if !ok {
 			v = grad
+		} else {
+			v = opt.Momentum*v + grad
 		}
-		v = opt.Momentum*v + grad
 		opt.buf[id] = v
 	} else {
 		v = grad
 	}
 	p.Data -= opt.Lr * v
-	p.ZeroGrad()
+	p.grad = 0.0
 }
 
 // New initializes a new SGD optimizer with the same parameters.

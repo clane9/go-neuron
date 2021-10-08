@@ -36,7 +36,7 @@ func TestMLP(t *testing.T) {
 	rand.Seed(12)
 
 	arch := []int{2, 3, 2, 1}
-	opt := neuron.NewSGD(1.0, 0.0, 0.0)
+	opt := neuron.NewSGD(1.0, 0.9, 1.0e-04)
 	n := neuron.NewMLP(arch, opt)
 
 	n.Start(true, 1)
@@ -44,9 +44,15 @@ func TestMLP(t *testing.T) {
 	n.Backward([]float64{1.0})
 
 	const outWant = 8.4846442116e-05
-	fmt.Printf("Output: %v\n", output)
 	if !almostEqual(output[0], outWant) {
 		t.Errorf("MLP output is %.10e; expected %.4e", output[0], outWant)
+	}
+
+	const weightWant = -1.0043583788e-01
+	const id = "002_000000"
+	weight := n.Layers[3][0].W.Params[id].Data
+	if !almostEqual(weight, weightWant) {
+		t.Errorf("Weight %s -> 003_000000 is %.10e; expected %.4e", id, weight, weightWant)
 	}
 }
 

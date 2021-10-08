@@ -7,8 +7,3 @@ type Param struct {
 	value        float64
 	grad         float64
 }
-
-// ZeroGrad zeros out the parameter's gradient
-func (p *Param) ZeroGrad() {
-	p.grad = 0.0
-}

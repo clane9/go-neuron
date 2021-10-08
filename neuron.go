@@ -33,11 +33,11 @@ type Unit struct {
 
 // A Weight represents a neuron's weight map.
 type Weight struct {
-	Params map[string]Param
+	Params map[string]*Param
 }
 
 func (w *Weight) init(id string, data float64, requiresGrad bool) {
-	w.Params[id] = Param{
+	w.Params[id] = &Param{
 		Data:         data,
 		RequiresGrad: requiresGrad,
 	}
@@ -68,7 +68,7 @@ func (w *Weight) backward(id string, grad float64) float64 {
 // NewWeight creates a new weight map.
 func NewWeight() *Weight {
 	w := Weight{
-		Params: make(map[string]Param),
+		Params: make(map[string]*Param),
 	}
 	return &w
 }
@@ -103,7 +103,7 @@ func newHiddenUnit(id string, stepDone chan int) *Unit {
 func newOutputUnit(id string, stepDone chan int) *Unit {
 	activ := new(Identity)
 	u := newUnit(id, activ, stepDone)
-	u.W.init(biasID, 0.1, true)
+	u.W.init(biasID, 0.0, true)
 	u.feedOut()
 	return u
 }
@@ -203,7 +203,7 @@ func (u *Unit) step() {
 		panic(fmt.Sprintf("Unit %s optimizer is uninitialized!", u.ID))
 	}
 	for k, p := range u.W.Params {
-		u.opt.Step(k, &p)
+		u.opt.Step(k, p)
 	}
 }
 
