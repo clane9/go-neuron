@@ -73,6 +73,14 @@ func NewWeight() *Weight {
 	return &w
 }
 
+// A Param is a neural network parameter
+type Param struct {
+	Data         float64
+	RequiresGrad bool
+	value        float64
+	grad         float64
+}
+
 // signals are used to communicate between neuron Units.
 type signal struct {
 	id    string
