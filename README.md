@@ -27,9 +27,9 @@ classify two-class Gaussian data. Here is the `main` function.
 func main() {
   // MLP with a 64-dim input, scalar output, and two 128-dim hidden layers.
   arch := []int{64, 128, 128, 1}
+  opt := neuron.NewSGD(1.0e-01, 0.9, 1.0e-05)
   n := neuron.NewMLP(arch, opt)
   // Start the network for training with the given "batch size"
-  opt := neuron.NewSGD(1.0e-01, 0.9, 1.0e-05)
   n.Start(true, 32)
 
   // Train for 200 steps.
