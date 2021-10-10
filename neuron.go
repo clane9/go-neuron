@@ -7,7 +7,6 @@
 package neuron
 
 import (
-	"fmt"
 	"math/rand"
 )
 
@@ -94,34 +93,35 @@ const (
 	biasID   = "_BIAS"
 )
 
-func newInputUnit(id string, stepDone chan int) *Unit {
+func newInputUnit(id string, opt Optimizer, stepDone chan int) *Unit {
 	activ := new(Identity)
-	u := newUnit(id, activ, stepDone)
+	u := newUnit(id, activ, opt, stepDone)
 	u.feedIn()
 	return u
 }
 
-func newHiddenUnit(id string, stepDone chan int) *Unit {
+func newHiddenUnit(id string, opt Optimizer, stepDone chan int) *Unit {
 	activ := new(Relu)
-	u := newUnit(id, activ, stepDone)
+	u := newUnit(id, activ, opt, stepDone)
 	u.W.init(biasID, 0.1, true)
 	return u
 }
 
-func newOutputUnit(id string, stepDone chan int) *Unit {
+func newOutputUnit(id string, opt Optimizer, stepDone chan int) *Unit {
 	activ := new(Identity)
-	u := newUnit(id, activ, stepDone)
+	u := newUnit(id, activ, opt, stepDone)
 	u.W.init(biasID, 0.0, true)
 	u.feedOut()
 	return u
 }
 
 // Create a new Unit with a given string id and layer type.
-func newUnit(id string, activ Activation, stepDone chan int) *Unit {
+func newUnit(id string, activ Activation, opt Optimizer, stepDone chan int) *Unit {
 	u := Unit{
 		ID:       id,
 		W:        NewWeight(),
 		activ:    activ,
+		opt:      opt,
 		input:    make(chan signal),
 		output:   make(map[string](chan signal)),
 		inputB:   make(chan signal),
@@ -158,10 +158,6 @@ func randUnif(a, b float64) float64 {
 	w := rand.Float64()
 	w = a + (b-a)*w
 	return w
-}
-
-func (u *Unit) setOptimizer(opt Optimizer) {
-	u.opt = opt.New()
 }
 
 // Forward pass through the unit. Collects input from all incoming units and
@@ -207,9 +203,6 @@ func (u *Unit) backward() {
 
 // Update the weights and bias by taking a gradient descent step.
 func (u *Unit) step() {
-	if u.opt == nil {
-		panic(fmt.Sprintf("Unit %s optimizer is uninitialized!", u.ID))
-	}
 	for k, p := range u.W.Params {
 		u.opt.Step(k, p)
 	}

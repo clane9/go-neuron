@@ -54,6 +54,12 @@ func TestMLP(t *testing.T) {
 	if !almostEqual(weight, weightWant) {
 		t.Errorf("Weight %s -> 003_000000 is %.10e; expected %.4e", id, weight, weightWant)
 	}
+
+	// Check that invalid args are checked.
+	assertPanic(t, func() { n.Forward([]float64{1.123}) })
+	// TODO: If backward is called without a forward it blocks because each unit
+	// is blocked on forward. This should be tracked and handled inside net?
+	assertPanic(t, func() { n.Backward([]float64{1.123, -2.234}) })
 }
 
 // Benchmark a full forward/backward/step loop.

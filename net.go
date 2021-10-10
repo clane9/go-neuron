@@ -50,13 +50,13 @@ func NewMLP(arch []int, opt Optimizer) *Net {
 			id = fmt.Sprintf(idFormStr, ii, jj)
 			switch ii {
 			case 0:
-				u = newInputUnit(id, n.stepDone)
+				// Need a new opt for each unit so that each gets their own buffer data.
+				u = newInputUnit(id, opt.New(), n.stepDone)
 			case numLayers - 1:
-				u = newOutputUnit(id, n.stepDone)
+				u = newOutputUnit(id, opt.New(), n.stepDone)
 			default:
-				u = newHiddenUnit(id, n.stepDone)
+				u = newHiddenUnit(id, opt.New(), n.stepDone)
 			}
-			u.setOptimizer(opt)
 			l[jj] = u
 		}
 		n.Layers[ii] = l
