@@ -1,4 +1,4 @@
-package neuron_test
+package neuron
 
 import (
 	"math"

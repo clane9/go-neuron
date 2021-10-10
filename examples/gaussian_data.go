@@ -14,7 +14,7 @@ func main() {
 	rand.Seed(2020)
 
 	const (
-		steps  = 3000
+		steps  = 200
 		inDim  = 64
 		outDim = 1
 	)
@@ -22,10 +22,11 @@ func main() {
 
 	// MLP with two 128-dim hidden layers.
 	arch := []int{inDim, 128, 128, outDim}
-	n := neuron.NewMLP(arch)
+	opt := neuron.NewSGD(1.0e-01, 0.9, 1.0e-05)
+	n := neuron.NewMLP(arch, opt)
 	// Start the network running for training. Gradients accumulate for 32 inputs
 	// before updating. (This is equivalent to mini-batch gradient descent.)
-	n.Start(true, 32, 1.0e-03)
+	n.Start(true, 32)
 
 	var (
 		data   []float64
@@ -43,7 +44,7 @@ func main() {
 		loss, grad = neuron.MarginLoss(score[0], target)
 		n.Backward([]float64{grad})
 
-		if ii%50 == 0 {
+		if ii%10 == 0 {
 			t := time.Now()
 			fmt.Printf("(%s)\tstep=%06d\tloss=%.5e\tgradL=%.5e\n",
 				t.Format("15:04:05.999"), ii, loss, grad)

@@ -27,12 +27,13 @@ classify two-class Gaussian data. Here is the `main` function.
 func main() {
   // MLP with a 64-dim input, scalar output, and two 128-dim hidden layers.
   arch := []int{64, 128, 128, 1}
-  n := neuron.NewMLP(arch)
-  // Start the network for training with the given "batch size" and learning rate.
-  n.Start(true, 32, 1.0e-03)
+  opt := neuron.NewSGD(1.0e-01, 0.9, 1.0e-05)
+  n := neuron.NewMLP(arch, opt)
+  // Start the network for training with the given "batch size"
+  n.Start(true, 32)
 
-  // Train for 1000 steps.
-  for ii := 0; ii <= 1000; ii++ {
+  // Train for 200 steps.
+  for ii := 0; ii <= 200; ii++ {
     data, target = gaussianData(64)
     score = n.Forward(data)
     loss, grad = neuron.MarginLoss(score[0], target)
