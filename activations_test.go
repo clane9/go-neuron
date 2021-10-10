@@ -1,14 +1,12 @@
-package neuron_test
+package neuron
 
 import (
 	"testing"
-
-	"github.com/clane9/go-neuron"
 )
 
 // Test ReLU
 func TestReluActivation(t *testing.T) {
-	relu := new(neuron.Relu)
+	relu := new(Relu)
 
 	x := 1.0
 	z := relu.Forward(x)

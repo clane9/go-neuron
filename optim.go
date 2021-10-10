@@ -23,7 +23,7 @@ func (opt *SGD) Step(id string, p *Param) {
 
 	grad := p.grad
 	if opt.WeightDecay > 0 {
-		grad -= opt.WeightDecay * p.Data
+		grad += opt.WeightDecay * p.Data
 	}
 
 	var v float64
